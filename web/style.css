@@ -38,6 +38,30 @@ input, textarea { font: inherit; color: inherit; }
 .pill { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
 .pill.warn { background: var(--warn-soft); color: var(--warn); }
 .mobile-only { display: none; }
+/* ---- icons: one consistent line-icon set (inline SVG, inherits text colour) ---- */
+.ico { display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.ico svg { display: block; }
+.btn, .link-btn, .act, .status, .mi { display: inline-flex; align-items: center; gap: 7px; }
+.btn.wide { justify-content: center; }
+.btn.ghost .ico, .link-btn .ico { opacity: .85; }
+.dz-ico { color: var(--accent); margin-bottom: 4px; }
+.features b { display: flex; align-items: center; gap: 8px; }
+.features b .ico { color: var(--accent); }
+.x-btn { display: inline-grid; place-items: center; }
+.mi.ok { color: var(--ok); } .mi.warn { color: var(--warn); }
+.act.on .ico svg { fill: currentColor; fill-opacity: .18; }
+.status { display: flex; width: fit-content; }
+.card .ci { color: var(--accent); margin-bottom: 8px; }
+.step .n { width: 36px; height: 36px; border-radius: 10px; margin-bottom: 10px; }
+.src-head span { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.sources summary { display: flex; align-items: center; gap: 7px; }
+.toast { display: flex; align-items: center; gap: 9px; }
+.btn.danger { display: inline-flex; align-items: center; gap: 8px; }
+.theme-btn { display: inline-grid; place-items: center; width: 38px; height: 38px; padding: 0; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); color: var(--text); transition: background .15s, transform .15s; }
+.theme-btn:hover { background: var(--panel-2); transform: rotate(12deg); }
+.theme-btn svg { width: 19px; height: 19px; display: block; }
+.auth { position: relative; }
+.auth-theme { position: absolute; top: 18px; right: 18px; z-index: 2; }
 
 /* ------------------------------------------------------------------ auth */
 .auth { min-height: 100%; display: grid; grid-template-columns: 1.1fr .9fr; gap: 40px; align-items: center; padding: 48px clamp(24px, 6vw, 96px); background:
