@@ -88,6 +88,13 @@ class Database:
 
             url = str(target).replace("postgres://", "postgresql://", 1)
             self._integrity = (psycopg.errors.UniqueViolation,)
+            try:  # fail fast with a readable reason (the pool alone retries silently for 30 s)
+                with psycopg.connect(url, connect_timeout=20) as probe:
+                    probe.execute("SELECT 1")
+            except Exception as exc:
+                reason = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+                raise RuntimeError(f"Cannot connect to Postgres ({type(exc).__name__}): {reason}. "
+                                   "Check DATABASE_URL - it needs the full user:password from your provider.") from None
             self.pool = ConnectionPool(
                 url, min_size=0, max_size=5, timeout=30, open=False,
                 # prepare_threshold=None keeps it compatible with PgBouncer-style poolers (Neon's "-pooler" host)
