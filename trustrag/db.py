@@ -1,7 +1,12 @@
-"""SQLite persistence: users, login sessions, conversations, messages.
+"""Persistence: users, login sessions, conversations, messages, uploaded documents.
 
-Passwords are stored as salted PBKDF2-HMAC-SHA256 hashes; session tokens are stored only as
-SHA-256 hashes, so a leaked database does not leak usable credentials.
+Two interchangeable back-ends behind one class:
+  * SQLite   - zero setup, used locally (a file path).
+  * Postgres - used in production, e.g. Neon / Supabase (a `postgresql://...` URL via DATABASE_URL).
+
+SQL is written once with `?` placeholders and translated for Postgres. Passwords are stored as salted
+PBKDF2-HMAC-SHA256 hashes; session tokens only as SHA-256 hashes, so a leaked database does not leak
+usable credentials.
 """
 from __future__ import annotations
 
@@ -24,15 +29,18 @@ _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
-  pw_hash TEXT NOT NULL, salt TEXT NOT NULL, created REAL NOT NULL);
+  pw_hash TEXT NOT NULL, salt TEXT NOT NULL, created DOUBLE PRECISION NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (
-  token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires REAL NOT NULL);
+  token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires DOUBLE PRECISION NOT NULL);
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  title TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL);
+  title TEXT NOT NULL, created DOUBLE PRECISION NOT NULL, updated DOUBLE PRECISION NOT NULL);
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY, conv_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-  role TEXT NOT NULL, content TEXT NOT NULL, meta TEXT NOT NULL DEFAULT '{}', created REAL NOT NULL);
+  role TEXT NOT NULL, content TEXT NOT NULL, meta TEXT NOT NULL DEFAULT '{}', created DOUBLE PRECISION NOT NULL);
+CREATE TABLE IF NOT EXISTS documents (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL,
+  body TEXT NOT NULL, created DOUBLE PRECISION NOT NULL, PRIMARY KEY (user_id, name));
 CREATE INDEX IF NOT EXISTS idx_conv_user ON conversations(user_id, updated DESC);
 CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conv_id, created);
 """
@@ -50,24 +58,75 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def is_postgres_url(value: Any) -> bool:
+    return isinstance(value, str) and value.lower().startswith(("postgres://", "postgresql://"))
+
+
+def to_pg_sql(sql: str) -> str:
+    """Translate the `?` placeholders used throughout this module to psycopg's `%s`."""
+    return sql.replace("%", "%%").replace("?", "%s")
+
+
+class _Conn:
+    """Tiny uniform wrapper so the rest of the module never cares which database it talks to."""
+
+    def __init__(self, raw: Any, postgres: bool):
+        self.raw, self.pg = raw, postgres
+
+    def execute(self, sql: str, params: tuple = ()) -> Any:
+        return self.raw.execute(to_pg_sql(sql) if self.pg else sql, params)
+
+
 class Database:
-    def __init__(self, path: Path):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.conn() as c:
-            c.executescript(SCHEMA)
+    def __init__(self, target: str | Path):
+        self.pg = is_postgres_url(target)
         self._failed: dict[str, list[float]] = {}
+        if self.pg:
+            import psycopg
+            from psycopg.rows import dict_row
+            from psycopg_pool import ConnectionPool
+
+            url = str(target).replace("postgres://", "postgresql://", 1)
+            self._integrity = (psycopg.errors.UniqueViolation,)
+            self.pool = ConnectionPool(
+                url, min_size=0, max_size=5, timeout=30, open=False,
+                # prepare_threshold=None keeps it compatible with PgBouncer-style poolers (Neon's "-pooler" host)
+                kwargs={"row_factory": dict_row, "prepare_threshold": None},
+                check=ConnectionPool.check_connection,  # transparently replaces connections Neon dropped while idle
+            )
+            self.pool.open(wait=False)
+            with self.conn() as c:
+                for stmt in filter(None, (s.strip() for s in SCHEMA.split(";"))):
+                    c.execute(stmt)
+        else:
+            self.path = Path(target)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._integrity = (sqlite3.IntegrityError,)
+            with self.conn() as c:
+                c.raw.executescript(SCHEMA)
+
+    @property
+    def backend(self) -> str:
+        return "postgres" if self.pg else "sqlite"
 
     @contextmanager
-    def conn(self) -> Iterator[sqlite3.Connection]:
-        c = sqlite3.connect(self.path, timeout=10)
-        c.row_factory = sqlite3.Row
-        c.execute("PRAGMA foreign_keys = ON")
+    def conn(self) -> Iterator[_Conn]:
+        if self.pg:
+            with self.pool.connection() as raw:  # commits on success, rolls back on error
+                yield _Conn(raw, True)
+            return
+        raw = sqlite3.connect(self.path, timeout=10)
+        raw.row_factory = sqlite3.Row
+        raw.execute("PRAGMA foreign_keys = ON")
         try:
-            yield c
-            c.commit()
+            yield _Conn(raw, False)
+            raw.commit()
         finally:
-            c.close()
+            raw.close()
+
+    def close(self) -> None:
+        if self.pg:
+            self.pool.close()
 
     # ------------------------------------------------------------------ users
     def register(self, email: str, password: str, name: str = "") -> dict[str, Any]:
@@ -85,7 +144,7 @@ class Database:
             with self.conn() as c:
                 c.execute("INSERT INTO users VALUES (?,?,?,?,?,?)",
                           (uid, email, name, _hash_pw(password, salt), salt.hex(), time.time()))
-        except sqlite3.IntegrityError:
+        except self._integrity:
             raise AuthError("An account with this email already exists.") from None
         return {"id": uid, "email": email, "name": name}
 
@@ -124,6 +183,21 @@ class Database:
         with self.conn() as c:
             c.execute("DELETE FROM sessions WHERE token_hash=?", (_hash_token(token),))
 
+    # ------------------------------------------------------------------ documents (so uploads survive restarts)
+    def save_document(self, user_id: str, name: str, body: str) -> None:
+        with self.conn() as c:
+            c.execute("DELETE FROM documents WHERE user_id=? AND name=?", (user_id, name))
+            c.execute("INSERT INTO documents VALUES (?,?,?,?)", (user_id, name, body, time.time()))
+
+    def documents(self, user_id: str) -> dict[str, str]:
+        with self.conn() as c:
+            rows = c.execute("SELECT name, body FROM documents WHERE user_id=?", (user_id,)).fetchall()
+        return {r["name"]: r["body"] for r in rows}
+
+    def delete_document(self, user_id: str, name: str) -> None:
+        with self.conn() as c:
+            c.execute("DELETE FROM documents WHERE user_id=? AND name=?", (user_id, name))
+
     # ------------------------------------------------------------------ conversations
     def new_conversation(self, user_id: str, title: str = "New chat") -> dict[str, Any]:
         cid, now = uuid.uuid4().hex, time.time()
@@ -143,7 +217,7 @@ class Database:
 
     def messages(self, conv_id: str) -> list[dict[str, Any]]:
         with self.conn() as c:
-            rows = c.execute("SELECT id, role, content, meta, created FROM messages WHERE conv_id=? ORDER BY created, rowid",
+            rows = c.execute("SELECT id, role, content, meta, created FROM messages WHERE conv_id=? ORDER BY created, id",
                              (conv_id,)).fetchall()
         return [{**dict(r), "meta": json.loads(r["meta"])} for r in rows]
 
@@ -167,8 +241,8 @@ class Database:
 
     def stats(self, user_id: str) -> dict[str, int]:
         with self.conn() as c:
-            convs = c.execute("SELECT COUNT(*) n FROM conversations WHERE user_id=?", (user_id,)).fetchone()["n"]
-            msgs = c.execute("SELECT COUNT(*) n FROM messages m JOIN conversations v ON v.id=m.conv_id "
+            convs = c.execute("SELECT COUNT(*) AS n FROM conversations WHERE user_id=?", (user_id,)).fetchone()["n"]
+            msgs = c.execute("SELECT COUNT(*) AS n FROM messages m JOIN conversations v ON v.id=m.conv_id "
                              "WHERE v.user_id=? AND m.role='user'", (user_id,)).fetchone()["n"]
         return {"conversations": convs, "questions": msgs}
 

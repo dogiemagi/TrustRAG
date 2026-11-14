@@ -3,7 +3,7 @@ services:
   - type: web
     name: trustrag
     runtime: python
-    plan: free                      # free instances sleep after ~15 min idle and have an EPHEMERAL disk
+    plan: free                      # free instances sleep after ~15 min idle. Data is safe: it lives in Postgres (DATABASE_URL), not on this disk
     buildCommand: pip install -r requirements.txt
     startCommand: python -m trustrag.webapp
     healthCheckPath: /api/status
@@ -18,13 +18,11 @@ services:
         value: offline              # no GPU/Ollama on Render. Change to anthropic/openai and add a key below for fluent answers
       - key: ALLOW_REGISTRATION
         value: "1"                  # set to 0 once you've created your account to lock sign-ups
+      - key: DATABASE_URL
+        sync: false                 # paste your Neon connection string in the Render dashboard; never commit it
       - key: ANTHROPIC_API_KEY
         sync: false                 # you paste the secret in the Render dashboard; never commit it
       - key: OPENAI_API_KEY
         sync: false
-    # Persistent storage (accounts, uploads) needs a PAID plan. Uncomment together with `plan: starter`:
-    # disk:
-    #   name: trustrag-data
-    #   mountPath: /var/data
-    #   sizeGB: 1
-    # ...and add env var  TRUSTRAG_DATA=/var/data
+    # No persistent disk needed: accounts, chats AND uploaded documents are stored in Postgres, and the
+    # search index is rebuilt from the database whenever the server starts.

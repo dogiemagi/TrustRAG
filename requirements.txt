@@ -4,6 +4,8 @@ pypdf>=4.0
 fastapi>=0.110
 uvicorn>=0.29
 pydantic>=2.6
+psycopg[binary]>=3.1     # Postgres driver (used only when DATABASE_URL is set)
+psycopg-pool>=3.2
 
 # Optional - uncomment what you want to use
 # anthropic>=0.40            # LLM_PROVIDER=anthropic

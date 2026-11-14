@@ -21,6 +21,7 @@ from . import __version__
 from .config import ROOT, Settings, get_settings
 from .db import AuthError, Database
 from .extract import ExtractError, extract_text
+from .service import safe_filename
 from .workspaces import WorkspaceManager
 
 WEB_DIR = ROOT / "web"
@@ -54,8 +55,8 @@ def display_name(source: str) -> str:
 
 def create_webapp(settings: Settings | None = None) -> FastAPI:
     s = settings or get_settings()
-    db = Database(s.db_path)
-    ws = WorkspaceManager(settings=s)
+    db = Database(s.database_url or s.db_path)
+    ws = WorkspaceManager(settings=s, db=db)
     app = FastAPI(title="TrustRAG", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json")
     ask_log: dict[str, deque] = defaultdict(deque)
 
@@ -88,7 +89,7 @@ def create_webapp(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/status")
     def status() -> dict:
         return {"app": "TrustRAG", "version": __version__, "llm": shared_llm.name, "model": shared_llm.model,
-                "fluent": shared_llm.is_real, "registration": s.allow_registration}
+                "fluent": shared_llm.is_real, "registration": s.allow_registration, "database": db.backend}
 
     @app.post("/api/register")
     def register(body: Credentials) -> dict:
@@ -152,10 +153,11 @@ def create_webapp(settings: Settings | None = None) -> FastAPI:
         rag = ws.get(user["id"])
         if len(rag.documents()) >= 25:
             raise HTTPException(400, "Document limit reached (25). Delete one first.")
-        saved = body.filename if body.filename.lower().endswith((".md", ".txt")) else body.filename + ".md"
+        saved = safe_filename(body.filename if body.filename.lower().endswith((".md", ".txt")) else body.filename + ".md")
+        db.save_document(user["id"], saved, text)  # database first: it is the source of truth
         report = rag.add_document(saved, text)
-        bad = [q for q in report.quarantined if q["source"].lower() == Path(saved).name.lower()]
-        return {"name": display_name(Path(saved).name), "pages": pages, "documents": report.documents,
+        bad = [q for q in report.quarantined if q["source"] == saved]
+        return {"name": display_name(saved), "pages": pages, "documents": report.documents,
                 "chunks": report.chunks, "quarantined": len(bad),
                 "warning": ("Part of this file looked like hidden instructions aimed at the AI "
                             "(prompt injection), so it was excluded from answers.") if bad else ""}
@@ -166,6 +168,7 @@ def create_webapp(settings: Settings | None = None) -> FastAPI:
         rag.s.docs_dir.mkdir(parents=True, exist_ok=True)
         for f in ws.sample_docs_dir().glob("*.md"):
             shutil.copy(f, rag.s.docs_dir / f.name)
+            db.save_document(user["id"], f.name, f.read_text(encoding="utf-8"))
         rep = rag.ingest_dir(rag.s.docs_dir)
         return {"documents": rep.documents, "chunks": rep.chunks, "quarantined": len(rep.quarantined)}
 
@@ -173,6 +176,7 @@ def create_webapp(settings: Settings | None = None) -> FastAPI:
     def delete_doc(name: str, user: dict = Depends(current_user)) -> dict:
         if not ws.get(user["id"]).remove_document(name):
             raise HTTPException(404, "Document not found.")
+        db.delete_document(user["id"], Path(name).name)
         return {"ok": True}
 
     # ------------------------------------------------------------------ conversations

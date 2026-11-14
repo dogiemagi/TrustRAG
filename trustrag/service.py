@@ -18,6 +18,12 @@ from .retriever import HybridRetriever, VectorStore
 from .text import content_terms
 
 
+def safe_filename(filename: str) -> str:
+    """The on-disk / in-database name for an uploaded file (no paths, no odd characters, .md/.txt suffix)."""
+    safe = re.sub(r"[^\w.\-]", "_", Path(filename).name) or "upload.md"
+    return safe if safe.lower().endswith((".md", ".txt")) else safe + ".md"
+
+
 @dataclass
 class IngestReport:
     documents: int
@@ -55,9 +61,7 @@ class TrustRAG:
         return self._index(chunks, len(files))
 
     def add_document(self, filename: str, content: str) -> IngestReport:
-        safe = re.sub(r"[^\w.\-]", "_", Path(filename).name) or "upload.md"
-        if not safe.lower().endswith((".md", ".txt")):
-            safe += ".md"
+        safe = safe_filename(filename)
         self.s.docs_dir.mkdir(parents=True, exist_ok=True)
         (self.s.docs_dir / safe).write_text(content, encoding="utf-8")
         return self.ingest_dir(self.s.docs_dir)

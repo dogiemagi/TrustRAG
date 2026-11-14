@@ -56,14 +56,27 @@ data/docs/  sample knowledge base (one file is deliberately poisoned)
 tests/      47 tests
 ```
 
-## Deploy on Render
-1. Push this repo to GitHub.
-2. Render dashboard -> **New** -> **Blueprint** -> pick the repo (it reads `render.yaml`).
-3. Optional: add `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (and set `LLM_PROVIDER`) for fluent answers.
-4. Open the `.onrender.com` URL, create your account, then set `ALLOW_REGISTRATION=0` to lock sign-ups.
+## Deploy: Render (app) + Neon (database)
+Locally the app uses a SQLite file. In production it uses **Postgres** whenever `DATABASE_URL` is set. Accounts, chats and
+uploaded documents all live in the database; the search index is rebuilt from it on startup, so Render restarts and redeploys
+lose nothing.
 
-Free tier caveats: the instance sleeps when idle (first request is slow) and its disk is **ephemeral** - accounts and
-uploads reset on every redeploy/restart. For persistence use a paid plan with a disk (see comments in `render.yaml`).
+1. **Neon**: create a project at neon.tech and copy the connection string (`postgresql://...?sslmode=require`).
+2. Push this repo to GitHub.
+3. **Render**: **New** -> **Blueprint** -> pick the repo (it reads `render.yaml`).
+4. When asked for env vars, paste `DATABASE_URL` (the Neon string). Optionally add `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
+   and set `LLM_PROVIDER` for fluent answers.
+5. Open the `.onrender.com` URL (`/api/status` should say `"database":"postgres"`), create your account, then set
+   `ALLOW_REGISTRATION=0` to lock sign-ups.
+
+Free-tier notes: Render sleeps idle instances (first request ~30-60 s) and Neon suspends idle compute (wakes in ~1 s).
+Neither deletes data. Tables are created automatically on first start.
+
+Verify the Postgres path yourself against a throwaway database:
+```bash
+set TEST_DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
+python -m pytest tests/test_postgres.py -v
+```
 
 ## Quality checks
 
@@ -83,7 +96,8 @@ becomes informative on a larger corpus.)
 ## Known limits (honest list)
 - Scanned PDFs (images only) aren't supported - no OCR.
 - A local 7B model on CPU takes ~10-60 s per answer (first one loads the model). The app pre-warms it and shows a live timer.
-- Sessions/uploads are stored on local disk and SQLite - fine for one machine; use Postgres + object storage to scale out.
+- Documents are stored as extracted text inside Postgres (fine for personal-sized libraries; use object storage for very large files).
+- One web worker is assumed (in-memory login-attempt counters and caches are per process).
 - Over plain HTTP: put it behind HTTPS (e.g. Caddy/nginx) before exposing it beyond localhost.
 
 ## Interview talking points
