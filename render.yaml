@@ -1,0 +1,30 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: trustrag
+    runtime: python
+    plan: free                      # free instances sleep after ~15 min idle and have an EPHEMERAL disk
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m trustrag.webapp
+    healthCheckPath: /api/status
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: HOST
+        value: 0.0.0.0              # Render injects PORT; the app reads it
+      - key: NO_BROWSER
+        value: "1"
+      - key: LLM_PROVIDER
+        value: offline              # no GPU/Ollama on Render. Change to anthropic/openai and add a key below for fluent answers
+      - key: ALLOW_REGISTRATION
+        value: "1"                  # set to 0 once you've created your account to lock sign-ups
+      - key: ANTHROPIC_API_KEY
+        sync: false                 # you paste the secret in the Render dashboard; never commit it
+      - key: OPENAI_API_KEY
+        sync: false
+    # Persistent storage (accounts, uploads) needs a PAID plan. Uncomment together with `plan: starter`:
+    # disk:
+    #   name: trustrag-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
+    # ...and add env var  TRUSTRAG_DATA=/var/data

@@ -1,0 +1,15 @@
+.claude/
+.venv/
+venv/
+.env.*
+!.env.example
+__pycache__/
+.pytest_cache/
+.env
+data/index/
+data/users/
+data/app.db
+data/traces.jsonl
+data/feedback.jsonl
+eval/reports/
+*.pyc

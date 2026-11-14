@@ -1,0 +1,11 @@
+# Runtime dependencies only (what Render / Docker install)
+numpy>=1.26
+pypdf>=4.0
+fastapi>=0.110
+uvicorn>=0.29
+pydantic>=2.6
+
+# Optional - uncomment what you want to use
+# anthropic>=0.40            # LLM_PROVIDER=anthropic
+# openai>=1.40               # LLM_PROVIDER=openai
+# sentence-transformers>=3.0 # EMBEDDINGS=st  (real semantic embeddings; large download)
