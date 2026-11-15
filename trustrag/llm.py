@@ -62,6 +62,65 @@ class OpenAILLM(BaseLLM):
         return LLMResponse(r.choices[0].message.content or "", u.prompt_tokens, u.completion_tokens, self.model)
 
 
+class GroqLLM(BaseLLM):
+    """Groq-hosted open models (fast, free tier) over Groq's OpenAI-compatible HTTP API - no SDK needed.
+
+    Reads GROQ_API_KEY (and optionally GROQ_BASE_URL, used by the tests). Any failure raises, and the
+    agent then falls back to the extractive answer, so a bad key / rate limit never breaks the chat.
+    """
+
+    name = "groq"
+    aux_calls = False  # one call per question keeps the free tier's requests-per-minute budget healthy
+
+    def __init__(self, model: str, api_key: str | None = None, base_url: str | None = None):
+        import os
+
+        self.model = model
+        self.api_key = api_key or os.getenv("GROQ_API_KEY", "")
+        self.base_url = (base_url or os.getenv("GROQ_BASE_URL") or "https://api.groq.com/openai/v1").rstrip("/")
+
+    def complete(self, system, prompt, max_tokens=600, temperature=0.0) -> LLMResponse:
+        import json
+        import time
+        import urllib.error
+        import urllib.request
+
+        if not self.api_key:
+            raise RuntimeError("GROQ_API_KEY is not set")
+        payload: dict = {"model": self.model, "temperature": temperature,
+                         "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
+        if "gpt-oss" in self.model.lower():
+            # Reasoning models spend part of the budget "thinking"; keep that short and the budget generous.
+            payload["reasoning_effort"] = "low"
+            payload["max_completion_tokens"] = max(max_tokens, 2000)
+        else:
+            payload["max_tokens"] = max_tokens
+        req = urllib.request.Request(
+            f"{self.base_url}/chat/completions", json.dumps(payload).encode(),
+            {"Content-Type": "application/json", "Authorization": "Bearer " + self.api_key, "User-Agent": "TrustRAG/1.0"})
+        data = None
+        for attempt in (0, 1):
+            try:
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    data = json.loads(r.read())
+                break
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and attempt == 0:  # rate limited: wait briefly, retry once
+                    try:
+                        wait = float(e.headers.get("retry-after", "2"))
+                    except (TypeError, ValueError):
+                        wait = 2.0
+                    time.sleep(min(wait, 5.0))
+                    continue
+                raise RuntimeError(f"Groq HTTP {e.code}: {e.read().decode('utf-8', 'ignore')[:200]}") from None
+        text = ((data or {}).get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+        if not text:
+            raise RuntimeError("Groq returned an empty answer")
+        usage = data.get("usage", {})
+        return LLMResponse(text, usage.get("prompt_tokens", estimate_tokens(prompt)),
+                           usage.get("completion_tokens", estimate_tokens(text)), self.model)
+
+
 class OllamaLLM(BaseLLM):
     """Local models through Ollama (https://ollama.com): free, private, no API key."""
 
@@ -178,11 +237,14 @@ class OfflineLLM(BaseLLM):
         return LLMResponse(text, estimate_tokens(prompt), estimate_tokens(text), self.model)
 
 
-def get_llm(provider: str, anthropic_model: str, openai_model: str, ollama_model: str = "llama3.2") -> BaseLLM:
+def get_llm(provider: str, anthropic_model: str, openai_model: str, ollama_model: str = "llama3.2",
+            groq_model: str = "openai/gpt-oss-20b") -> BaseLLM:
     if provider == "anthropic":
         return AnthropicLLM(anthropic_model)
     if provider == "openai":
         return OpenAILLM(openai_model)
+    if provider == "groq":
+        return GroqLLM(groq_model)
     if provider == "ollama":
         return OllamaLLM(ollama_model)
     return OfflineLLM()

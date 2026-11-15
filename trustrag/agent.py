@@ -6,6 +6,7 @@ configured, and falls back to deterministic rules otherwise - so behaviour is te
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -17,6 +18,8 @@ from .llm import BaseLLM, OfflineLLM
 from .observability import Trace, TraceStore
 from .retriever import Hit, HybridRetriever
 from .tools import extract_expression, fmt_number, safe_eval
+
+log = logging.getLogger("trustrag")
 
 ABSTAIN_MSG = ("I couldn't find a reliable answer in the knowledge base, so I won't guess. "
                "Try rephrasing, or contact support.")
@@ -169,6 +172,7 @@ class Agent:
                 r = self.llm.complete(SYSTEM_PROMPT, prompt)
             except Exception as exc:  # model down / timeout / bad key: degrade, never fail the user's question
                 sp["error"] = repr(exc)[:200]
+                log.warning("LLM call failed (%s: %s); answering with the extractive fallback", self.llm.name, repr(exc)[:300])
                 flags.append("model_unavailable_used_extractive")
                 r = OfflineLLM().complete(SYSTEM_PROMPT, prompt)
             trace.add_usage(r.input_tokens, r.output_tokens, self.s.price_in_per_mtok, self.s.price_out_per_mtok)

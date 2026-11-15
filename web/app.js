@@ -352,6 +352,7 @@ function botMessage(m) {
       : h("span", { class: "mi warn" }, icon("alert", 15), "Partly supported - double-check"));
   }
   if (meta.tools_used && meta.tools_used.includes("calculator")) row.append(h("span", { class: "mi" }, icon("calculator", 15), "Used calculator"));
+  if (flags.includes("model_unavailable_used_extractive")) row.append(h("span", { class: "mi warn", title: "The AI model could not be reached, so this answer is quoted straight from your documents." }, icon("alert", 15), "AI model unavailable - quoted from your documents"));
   if (flags.includes("pii_redacted")) row.append(h("span", { class: "mi" }, icon("eye-off", 15), "Personal data hidden"));
   if (meta.cached) row.append(h("span", { class: "mi" }, icon("zap", 15), "Instant (cached)"));
   else if (meta.latency_ms != null) row.append(h("span", { class: "mi" }, icon("clock", 15), fmtMs(meta.latency_ms)));

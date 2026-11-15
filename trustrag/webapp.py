@@ -62,7 +62,7 @@ def create_webapp(settings: Settings | None = None) -> FastAPI:
 
     from .llm import get_llm as _get_llm
 
-    shared_llm = _get_llm(s.llm_provider, s.anthropic_model, s.openai_model, s.ollama_model)
+    shared_llm = _get_llm(s.llm_provider, s.anthropic_model, s.openai_model, s.ollama_model, s.groq_model)
     if hasattr(shared_llm, "warmup"):
         shared_llm.warmup()  # local model: load into memory now, not on the first question
 

@@ -3,7 +3,7 @@ services:
   - type: web
     name: trustrag
     runtime: python
-    plan: free                      # free instances sleep after ~15 min idle. Data is safe: it lives in Postgres (DATABASE_URL), not on this disk
+    plan: free                      # free instances sleep after ~15 min idle. Data is safe: it lives in Postgres (DATABASE_URL)
     buildCommand: pip install -r requirements.txt
     startCommand: python -m trustrag.webapp
     healthCheckPath: /api/status
@@ -14,15 +14,18 @@ services:
         value: 0.0.0.0              # Render injects PORT; the app reads it
       - key: NO_BROWSER
         value: "1"
-      - key: LLM_PROVIDER
-        value: offline              # no GPU/Ollama on Render. Change to anthropic/openai and add a key below for fluent answers
-      - key: ALLOW_REGISTRATION
-        value: "1"                  # set to 0 once you've created your account to lock sign-ups
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b   # same model ContextIQ used
+      - key: GROQ_API_KEY
+        sync: false                 # paste in the Render dashboard; never commit. With a key set, the app auto-selects Groq
       - key: DATABASE_URL
         sync: false                 # paste your Neon connection string in the Render dashboard; never commit it
+      - key: ALLOW_REGISTRATION
+        value: "1"                  # set to 0 once you've created your account to lock sign-ups
       - key: ANTHROPIC_API_KEY
-        sync: false                 # you paste the secret in the Render dashboard; never commit it
+        sync: false                 # optional alternatives (take priority over Groq if set)
       - key: OPENAI_API_KEY
         sync: false
     # No persistent disk needed: accounts, chats AND uploaded documents are stored in Postgres, and the
     # search index is rebuilt from the database whenever the server starts.
+    # Without any model key the app still works in "offline mode" (answers quoted from your documents).

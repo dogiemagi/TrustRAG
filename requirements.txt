@@ -6,8 +6,11 @@ uvicorn>=0.29
 pydantic>=2.6
 psycopg[binary]>=3.1     # Postgres driver (used only when DATABASE_URL is set)
 psycopg-pool>=3.2
+gunicorn>=21.0           # only needed if the host starts the app with `gunicorn app:app`
+a2wsgi>=1.10             # lets gunicorn serve the FastAPI app (see app.py)
 
 # Optional - uncomment what you want to use
 # anthropic>=0.40            # LLM_PROVIDER=anthropic
 # openai>=1.40               # LLM_PROVIDER=openai
 # sentence-transformers>=3.0 # EMBEDDINGS=st  (real semantic embeddings; large download)
+# Groq needs no extra package: set GROQ_API_KEY (and optionally GROQ_MODEL).

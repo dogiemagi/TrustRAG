@@ -16,6 +16,8 @@ def _pick_provider() -> str:
         return "anthropic"
     if os.getenv("OPENAI_API_KEY"):
         return "openai"
+    if os.getenv("GROQ_API_KEY"):
+        return "groq"  # hosted open models, fast, has a free tier
     if _ollama_running():
         return "ollama"  # free local model, no API key needed
     return "offline"  # deterministic extractive generator: runs with zero API keys
@@ -52,6 +54,7 @@ class Settings:
     rate_limit_per_min: int
     db_path: Path = ROOT / "data" / "app.db"
     ollama_model: str = "llama3.2"
+    groq_model: str = "openai/gpt-oss-20b"
     allow_registration: bool = True
     database_url: str | None = None  # postgresql://... (Neon/Supabase). If unset, SQLite at db_path is used.
 
@@ -80,6 +83,7 @@ def get_settings() -> Settings:
         rate_limit_per_min=int(os.getenv("RATE_LIMIT_PER_MIN", "60")),
         db_path=Path(os.getenv("TRUSTRAG_DB", data / "app.db")),
         ollama_model=os.getenv("OLLAMA_MODEL", "llama3.2"),
+        groq_model=os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"),
         allow_registration=os.getenv("ALLOW_REGISTRATION", "1") != "0",
         database_url=os.getenv("DATABASE_URL") or None,
     )

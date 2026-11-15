@@ -37,7 +37,8 @@ class TrustRAG:
         self.embedder = get_embedder(self.s.embeddings)
         self.store = VectorStore(self.embedder)
         self.traces = TraceStore(self.s.trace_file)
-        self.llm = get_llm(self.s.llm_provider, self.s.anthropic_model, self.s.openai_model, self.s.ollama_model)
+        self.llm = get_llm(self.s.llm_provider, self.s.anthropic_model, self.s.openai_model, self.s.ollama_model,
+                           self.s.groq_model)
         self.cache = SemanticCache(self.embedder, self.s.cache_threshold, self.s.cache_ttl)
         self.retriever: HybridRetriever
         self.agent: Agent
